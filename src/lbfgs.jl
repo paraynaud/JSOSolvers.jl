@@ -133,6 +133,7 @@ function SolverCore.solve!(
   verbose::Int = 0,
   verbose_subsolver::Int = 0,
   adaptive::Bool=true,
+  verbose_hyperparamters::Bool=false,
   θₖ=1.,
   γ=1e-5,
 ) where {T, V}
@@ -168,8 +169,14 @@ function SolverCore.solve!(
   c = - θₖ^2
   r1, r2 = positive_quadratic_roots(1,b,c)
   θₖ₊₁ = max(r1, r2)
+  μ = (θₖ * (1 - θₖ)) / (θₖ^2 + θₖ₊₁)
+
+  (!adaptive) && (θₖ = 0)
   (!adaptive) && (θₖ₊₁ = 0)
-  μ = (θₖ * (1 - θₖ))/ (θₖ^2 + θₖ₊₁)
+  (!adaptive) && (μ = 0)
+  verbose_hyperparamters && println("θₖ, θₖ₊₁, μ :" * string(θₖ) * ", " * string(θₖ₊₁) * ", " *  string(μ))
+  
+  θₖ = θₖ₊₁
 
   vx .= x .+ μ .* v
 
@@ -272,6 +279,14 @@ function SolverCore.solve!(
     r1, r2 = positive_quadratic_roots(1,b,c)
     θₖ₊₁ = max(r1, r2)    
     μ = (θₖ * (1 - θₖ))/ (θₖ^2 + θₖ₊₁)
+
+    (!adaptive) && (θₖ = 0)
+    (!adaptive) && (θₖ₊₁ = 0)
+    (!adaptive) && (μ = 0)
+    verbose_hyperparamters && (stats.iter % 10 == 0) && println("θₖ, θₖ₊₁, μ :" * string(θₖ) * ", " * string(θₖ₊₁) * ", " *  string(μ))
+
+    θₖ = θₖ₊₁
+
     callback(nlp, solver, stats)
 
     done = stats.status != :unknown
