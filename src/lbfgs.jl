@@ -100,6 +100,13 @@ function SolverCore.reset!(solver::LBFGSSolver, nlp::AbstractNLPModel)
   solver
 end
 
+function positive_quadratic_roots(a,b,c)
+  Δ = b^2 - 4 * a * c  
+  r1 = (-b + sqrt(Δ)) / (2 * a)
+  r2 = (-b - sqrt(Δ)) / (2 * a)
+  return r1, r2
+end
+
 @doc (@doc LBFGSSolver) function lbfgs(
   nlp::AbstractNLPModel;
   x::V = nlp.meta.x0,
@@ -125,6 +132,9 @@ function SolverCore.solve!(
   bk_max::Int = 25,
   verbose::Int = 0,
   verbose_subsolver::Int = 0,
+  adaptive::Bool=true,
+  θₖ=1.,
+  γ=1e-5,
 ) where {T, V}
   if !(nlp.meta.minimize)
     error("lbfgs only works for minimization problem")
@@ -149,8 +159,22 @@ function SolverCore.solve!(
   H = solver.H
   reset!(H)
 
-  f, ∇f = objgrad!(nlp, x, ∇f)
+  v = zeros(T, n)
+  vx = similar(x)
+  scaled_step = similar(x)
+  
 
+  b = (θₖ^2 - γ)
+  c = - θₖ^2
+  r1, r2 = positive_quadratic_roots(1,b,c)
+  θₖ₊₁ = max(r1, r2)
+  (!adaptive) && (θₖ₊₁ = 0)
+  μ = (θₖ * (1 - θₖ))/ (θₖ^2 + θₖ₊₁)
+
+  vx .= x .+ μ .* v
+
+  f = obj(nlp, x)
+  ∇f = grad!(nlp, vx, ∇f)
   ∇fNorm = nrm2(n, ∇f)
   ϵ = atol + rtol * ∇fNorm
 
@@ -185,6 +209,9 @@ function SolverCore.solve!(
   done = stats.status != :unknown
 
   while !done
+    vx .= x .+ μ .* v
+    ∇f = grad!(nlp, vx, ∇f)
+
     mul!(d, H, ∇f, -one(T), zero(T))
     slope = dot(n, d, ∇f)
     if slope ≥ 0
@@ -198,6 +225,9 @@ function SolverCore.solve!(
     t, good_grad, ft, nbk, nbW =
       armijo_wolfe(h, f, slope, ∇ft, τ₁ = τ₁, bk_max = bk_max, verbose = Bool(verbose_subsolver))
 
+    v .= μ .* v .+ t .* d
+    xt .= x .+ v
+
     copyaxpy!(n, t, d, x, xt)
     good_grad || grad!(nlp, xt, ∇ft)
 
@@ -208,7 +238,7 @@ function SolverCore.solve!(
 
     # Move on.
     x .= xt
-    f = ft
+    f = obj(nlp, x)
     ∇f .= ∇ft
 
     ∇fNorm = nrm2(n, ∇f)
@@ -237,6 +267,11 @@ function SolverCore.solve!(
       ),
     )
 
+    b = (θₖ^2 - γ)
+    c = - θₖ^2
+    r1, r2 = positive_quadratic_roots(1,b,c)
+    θₖ₊₁ = max(r1, r2)    
+    μ = (θₖ * (1 - θₖ))/ (θₖ^2 + θₖ₊₁)
     callback(nlp, solver, stats)
 
     done = stats.status != :unknown
